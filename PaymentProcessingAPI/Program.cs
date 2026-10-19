@@ -40,6 +40,7 @@ try
     var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     logger.LogInformation("Применение миграций EF Core к базе PaymentProcessing");
     await dbContext.Database.MigrateAsync();
+    await DefaultAccountSeeder.SeedAsync(dbContext);
     logger.LogInformation("База PaymentProcessing готова");
 }
 catch (Exception ex)

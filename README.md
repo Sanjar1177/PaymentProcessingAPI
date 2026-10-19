@@ -14,24 +14,20 @@ ASP.NET Core Web API на .NET 10 с PostgreSQL и Entity Framework Core.
 
 В `PaymentProcessingAPI/appsettings.json` находится безопасная локальная строка подключения по умолчанию:
 
-```text
 Host=localhost;Port=5432;Database=PaymentProcessing;Username=postgres;Password=postgres
-```
 
 Измените пользователя и пароль под свою установку PostgreSQL. Чтобы не хранить собственный пароль в файле проекта, задайте строку через User Secrets:
 
-```powershell
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=PaymentProcessing;Username=postgres;Password=<ваш-пароль>" --project PaymentProcessingAPI
-```
+При запуске API применяет EF Core миграции. Если базы `PaymentProcessing` ещё нет, PostgreSQL создаст её автоматически при наличии у пользователя права `CREATEDB`; затем будут созданы таблицы. После применения миграций приложение добавляет в `Accounts` следующие данные, если эти счета еще не существуют:
 
-При запуске API применяет EF Core миграции. Если базы `PaymentProcessing` ещё нет, PostgreSQL создаст её автоматически при наличии у пользователя права `CREATEDB`; затем будут созданы таблицы. Подключение задаётся через конфигурацию приложения, а пароль рекомендуется хранить в User Secrets.
+| `Id` | `AccountNumber` | `CurrencyCode` | `Balance` | `ReservedBalance` | `IsActive` | `CreatedAtUtc` |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| Генерируется приложением | `ACC_DEBIT_001` | `860` | `500000.00` | `0.00` | `true` | Текущее время UTC |
+| Генерируется приложением | `ACC_CREDIT_001` | `860` | `100000.00` | `0.00` | `true` | Текущее время UTC |
+
+Повторный запуск не сбрасывает баланс существующих счетов. Подключение задаётся через конфигурацию приложения, а пароль рекомендуется хранить в User Secrets.
 
 ## Запуск
-
-```powershell
-dotnet restore
-dotnet run --project PaymentProcessingAPI
-```
 
 Swagger UI в профиле Development: [http://localhost:5006/swagger](http://localhost:5006/swagger).
 
@@ -53,34 +49,11 @@ Swagger UI в профиле Development: [http://localhost:5006/swagger](http:/
 
 ## Unit-тесты
 
-Запуск тестов из корня репозитория:
-
-```powershell
-dotnet test PaymentProcessingAPI.slnx
-```
-
 Unit-тесты написаны по паттерну AAA: подготовка данных, выполнение действия и проверка результата. Они проверяют правила входных данных, доступный остаток и достаточность средств, повтор запроса с тем же `transactionId`, поведение демо-банка при успехе, отказе и Timeout, а также параллельные вызовы демо-клиента с одним идентификатором.
 
 ## Миграции EF Core
 
-Инструмент `dotnet-ef` должен быть версии 10. Установите его при необходимости:
-
-```powershell
-dotnet tool install --global dotnet-ef --version 10.0.5
-```
-
-Применить миграции к локальной базе:
-
-```powershell
-dotnet ef database update --project PaymentProcessingAPI --startup-project PaymentProcessingAPI
-```
-
-Создать следующую миграцию после добавления сущностей и конфигурации в `ApplicationDbContext`:
-
-```powershell
-dotnet ef migrations add <MigrationName> --project PaymentProcessingAPI --startup-project PaymentProcessingAPI
-dotnet ef database update --project PaymentProcessingAPI --startup-project PaymentProcessingAPI
-```
+Инструмент `dotnet-ef` должен быть версии 10.0.5. Установите его при необходимости:
 
 Миграции создают таблицы `Accounts`, `Payments`, `PaymentAttempts`, `PaymentStatusHistory` и `LedgerEntries` в БД `PaymentProcessing`. Уникальный `TransactionId` защищает создание от повторов; `PaymentAttempts` хранит результаты вызовов банка, а `PaymentStatusHistory` — историю смены статусов. При регистрации платежа сумма резервируется на счёте отправителя до подтверждения результата банка. `LedgerEntries` хранит историю дебета и кредита после подтверждённого перевода.
 
