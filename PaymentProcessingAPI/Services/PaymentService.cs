@@ -12,7 +12,7 @@ public sealed class PaymentService(ApplicationDbContext dbContext, ILogger<Payme
     public async Task<PaymentResult> CreateAsync(CreatePaymentRequest request, CancellationToken cancellationToken = default)
     {
         // Проверяем формат до обращения к базе, чтобы отклонять некорректный запрос сразу.
-        Validate(request);
+        PaymentRules.Validate(request);
 
         // Повтор с тем же transactionId должен вернуть уже созданный платеж, не резервируя деньги повторно.
         var existing = await FindByTransactionIdAsync(request.TransactionId, cancellationToken);
@@ -41,8 +41,7 @@ public sealed class PaymentService(ApplicationDbContext dbContext, ILogger<Payme
             throw new InvalidPaymentException("Оба счета должны быть активны.");
         if (sender.CurrencyCode != request.Currency || receiver.CurrencyCode != request.Currency)
             throw new InvalidPaymentException("Валюта платежа должна совпадать с валютой обоих счетов.");
-        if (sender.Balance - sender.ReservedBalance < request.Amount)
-            throw new InvalidPaymentException("На счете отправителя недостаточно доступных средств.");
+        PaymentRules.EnsureSufficientFunds(sender.Balance, sender.ReservedBalance, request.Amount);
 
         // На время ожидания ответа банка сумма недоступна для других платежей, но баланс пока не списывается.
         var payment = new Payment
@@ -112,13 +111,7 @@ public sealed class PaymentService(ApplicationDbContext dbContext, ILogger<Payme
     private static PaymentResult ReturnExistingOrThrow(Payment payment, CreatePaymentRequest request)
     {
         // Один ключ идемпотентности нельзя повторно использовать для другого набора параметров.
-        if (payment.SenderAccount.AccountNumber != request.SenderAccount ||
-            payment.ReceiverAccount.AccountNumber != request.ReceiverAccount ||
-            payment.Amount != request.Amount ||
-            payment.CurrencyCode != request.Currency)
-        {
-            throw new IdempotencyConflictException(request.TransactionId);
-        }
+        PaymentRules.EnsureSameRequest(payment, request);
 
         return Map(payment, isDuplicate: true);
     }
@@ -132,22 +125,6 @@ public sealed class PaymentService(ApplicationDbContext dbContext, ILogger<Payme
         payment.Status,
         payment.CreatedAtUtc,
         isDuplicate);
-
-    private static void Validate(CreatePaymentRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.TransactionId) || request.TransactionId.Length > 100)
-            throw new InvalidPaymentException("Не указан идентификатор транзакции или его длина превышает 100 символов.");
-        if (string.IsNullOrWhiteSpace(request.SenderAccount) || request.SenderAccount.Length > 64)
-            throw new InvalidPaymentException("Не указан счет отправителя или его длина превышает 64 символа.");
-        if (string.IsNullOrWhiteSpace(request.ReceiverAccount) || request.ReceiverAccount.Length > 64)
-            throw new InvalidPaymentException("Не указан счет получателя или его длина превышает 64 символа.");
-        if (string.Equals(request.SenderAccount, request.ReceiverAccount, StringComparison.Ordinal))
-            throw new InvalidPaymentException("Счета отправителя и получателя должны различаться.");
-        if (request.Amount <= 0 || decimal.Round(request.Amount, 2) != request.Amount)
-            throw new InvalidPaymentException("Сумма должна быть положительной и содержать не более двух знаков после запятой.");
-        if (request.Currency is < 1 or > 999)
-            throw new InvalidPaymentException("Код валюты должен быть трехзначным числом.");
-    }
 
     private static bool IsTransactionIdConflict(DbUpdateException exception) =>
         exception.InnerException is PostgresException
